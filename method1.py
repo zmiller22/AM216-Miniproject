@@ -63,17 +63,18 @@ drugs_ecfp2 = np.array([ Chem.GetMorganFingerprintAsBitVect(m,2) for m in drugs_
 # Prepare train/test data with fold indices
 rows, cols = np.where(np.isnan(affinity)==False)
  
-
+#%%
 # Create test and train data
 drugs_tr = drugs[ rows[train_fold] ] #98545 array of SMILES strings
-proteins_tr = np.array([ seq_to_cat(p) for p in proteins[cols[train_fold]] ])#98545x1000 array of protein row vectors
+proteins_tr = np.array([ seq_to_cat(p) for p in proteins[cols[train_fold]] ])[:,:,np.newaxis]#98545x1000 array of protein row vectors
+drugs_ecfp2_tr = drugs_ecfp2[ rows[train_fold] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
 affinity_tr = affinity[rows[train_fold], cols[train_fold]] #98545 array of affinity vals
-drugs_ecfp2_tr = drugs_ecfp2[ rows[train_fold] ] #98545x2048 array of molecule fingerprint bit vectors
+
 
 drugs_ts = drugs[rows[test_fold]]
-drugs_ecfp2_ts = drugs_ecfp2[ rows[test_fold] ]
-proteins_ts = np.array([seq_to_cat(p) for p in proteins[cols[test_fold]]])
-affinity_ts = affinity[rows[test_fold], cols[test_fold]]  
+drugs_ecfp2_ts = drugs_ecfp2[ rows[test_fold] ][:,:,np.newaxis]
+proteins_ts = np.array([seq_to_cat(p) for p in proteins[cols[test_fold]]])[:,:,np.newaxis]
+affinity_ts = affinity[rows[test_fold], cols[test_fold]]
 
 ## In case we decide to use concatenated vectors
 # # Concatenate the protein and drugs vectors into one array
@@ -83,27 +84,67 @@ affinity_ts = affinity[rows[test_fold], cols[test_fold]]
 # test_vals = affinity_ts
 
 #%% Using tf.keras api to create a custom model shape (not sequential)
-from tensorflow.keras.layers import Input, Dense, Conv1D, MaxPool1D, Flatten, Concatenate, concatenate
+from tensorflow.keras.layers import Input, Dense, Conv1D, MaxPool1D, Flatten, Concatenate, concatenate, Dropout
 from tensorflow.keras.models import Model
 
 drug_input_shape = (drugs_ecfp2_tr.shape[1],1)
-protein_input_shape = (drugs_ecfp2_tr.shape[1],1)
+protein_input_shape = (proteins_tr.shape[1],1)
 
-dl_1 = Input( shape=drug_input_shape, name='Drugs_Input' )
-dl_2 = Conv1D(100, 20, activation='relu')(dl_1)
+# Conv block for the drugs
+drug_input = Input( shape=drug_input_shape, name='Drugs_Input' )
+dl_2 = Conv1D(100, 20, activation='relu')(drug_input)
 dl_3 = Conv1D(150, 20, activation='relu')(dl_2)
 dl_4  = Conv1D(200, 20, activation='relu')(dl_3)
 dl_5 = MaxPool1D(3)(dl_4)
 dl_6 = Flatten()(dl_5)
 
-pl_1 = Input( shape=protein_input_shape, name="Proteins_Input")
-pl_2 = Conv1D(100, 10, activation='relu')(pl_1)
+# Conv block for the proteins
+protein_input = Input( shape=protein_input_shape, name="Proteins_Input")
+pl_2 = Conv1D(100, 10, activation='relu')(protein_input)
 pl_3 = Conv1D(150, 10, activation='relu')(pl_2)
 pl_4  = Conv1D(200, 10, activation='relu')(pl_3)
 pl_5 = MaxPool1D(3)(pl_4)
 pl_6 = Flatten()(pl_5)
 
-#comb_input = tf.stack([dl_5, pl_5])
+# Combined output of both the Conv blocks
 comb_input = Concatenate(1)([dl_6, pl_6])
 
-test_model = Model(inputs=[dl_1, pl_1], outputs=comb_input)
+# Dense layers to output
+cl_1 = Dense(1024)(comb_input)
+cl_2 = Dropout(0.1)(cl_1)
+cl_3 = Dense(1024)(cl_2)
+cl_4 = Dropout(0.1)(cl_3)
+cl_5 = Dense(512)(cl_4)
+output = Dense(1)(cl_5)
+
+# Create the model
+model = Model(inputs=[drug_input, protein_input], outputs=output)
+
+callbacks_list = [
+    keras.callbacks.ModelCheckpoint(
+        filepath='best_model.{epoch:02d}-{val_loss:.2f}.h5',
+        monitor='val_loss', save_best_only=True),
+    keras.callbacks.EarlyStopping(monitor='acc', patience=1)
+]
+
+# Training parameters
+BATCH_SIZE = 128
+EPOCHS = 50
+
+# Optimizer Parameters
+LR = 0.01
+MOMENTUM = 0
+OPT = tf.keras.optimizers.Adam()
+#OPT = tf.keras.optimizers.SGD(learning_rate=LR, momentum=MOMENTUM)
+
+# Loss parameters
+#LOSS = tf.losses.mean_squared_error()
+
+model.compile(optimizer=OPT, loss='mse') 
+H = model.fit([drugs_ecfp2_tr, proteins_tr], affinity_tr, 
+              validation_data=([drugs_ecfp2_ts, proteins_ts], affinity_ts),
+              epochs=EPOCHS, batch_size=BATCH_SIZE, callbacks=callbacks_list,
+              verbose=1
+              )
+
+
