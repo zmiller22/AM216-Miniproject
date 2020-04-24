@@ -51,7 +51,7 @@ for i in range(5):
     val_fold=train_fold.pop(i)
     train_fold_copy = [ee for e in train_fold for ee in e ]   
     cross_val_train.append(train_fold_copy)
-    train_fold.append(val_fold)
+    train_fold.insert(i,val_fold)
     
 '''
 cross validation folds are stored in train_fold[0]...train_fold[4]
