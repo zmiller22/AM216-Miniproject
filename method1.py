@@ -45,13 +45,17 @@ proteins = np.array(list(proteins_.values()))
 affinity = np.array(pickle.load(open(fpath + "Y","rb"), encoding='latin1'))
 
 # Read in train/test fold  
-train_fold = json.load(open(fpath + "folds/train_fold_setting1.txt"))
-train_fold = [ee for e in train_fold for ee in e ]    
+train_fold = json.load(open(fpath + "train_fold_setting1.txt"))
+cross_val_train=[]
+for i in range(5):
+    val_fold=train_fold.pop(i)
+    train_fold_copy = [ee for e in train_fold for ee in e ]   
+    cross_val_train.append(train_fold_copy)
+    train_fold.insert(i,val_fold)
+    
 '''
-Here all validation folds are aggregated into training set. 
-If you want to train models with different architectures and/or 
-optimize for model hyperparameters, we encourage you to use 5-fold 
-cross validation as provided here.
+cross validation folds are stored in train_fold[0]...train_fold[4]
+the corresponding training folds are stored in cross_val_train[0]...cross_val_train[4]
 '''
 test_fold = json.load(open(fpath + "folds/test_fold_setting1.txt"))
 
