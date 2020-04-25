@@ -92,17 +92,17 @@ protein_input_shape = (proteins_tr.shape[1],1)
 
 # Conv block for the drugs
 drug_input = Input( shape=drug_input_shape, name='Drugs_Input' )
-dl_2 = Conv1D(100, 20, activation='relu')(drug_input)
-dl_3 = Conv1D(150, 20, activation='relu')(dl_2)
-dl_4  = Conv1D(200, 20, activation='relu')(dl_3)
+dl_2 = Conv1D(50, 20, activation='relu')(drug_input)
+dl_3 = Conv1D(100, 20, activation='relu')(dl_2)
+dl_4  = Conv1D(150, 20, activation='relu')(dl_3)
 dl_5 = MaxPool1D(3)(dl_4)
 dl_6 = Flatten()(dl_5)
 
 # Conv block for the proteins
 protein_input = Input( shape=protein_input_shape, name="Proteins_Input")
-pl_2 = Conv1D(100, 10, activation='relu')(protein_input)
-pl_3 = Conv1D(150, 10, activation='relu')(pl_2)
-pl_4  = Conv1D(200, 10, activation='relu')(pl_3)
+pl_2 = Conv1D(50, 10, activation='relu')(protein_input)
+pl_3 = Conv1D(100, 10, activation='relu')(pl_2)
+pl_4  = Conv1D(150, 10, activation='relu')(pl_3)
 pl_5 = MaxPool1D(3)(pl_4)
 pl_6 = Flatten()(pl_5)
 
@@ -110,11 +110,11 @@ pl_6 = Flatten()(pl_5)
 comb_input = Concatenate(1)([dl_6, pl_6])
 
 # Dense layers to output
-cl_1 = Dense(1024)(comb_input)
+cl_1 = Dense(512)(comb_input)
 cl_2 = Dropout(0.1)(cl_1)
-cl_3 = Dense(1024)(cl_2)
+cl_3 = Dense(512)(cl_2)
 cl_4 = Dropout(0.1)(cl_3)
-cl_5 = Dense(512)(cl_4)
+cl_5 = Dense(256)(cl_4)
 output = Dense(1)(cl_5)
 
 # Create the model
@@ -124,7 +124,7 @@ callbacks_list = [
     keras.callbacks.ModelCheckpoint(
         filepath='best_model.{epoch:02d}-{val_loss:.2f}.h5',
         monitor='val_loss', save_best_only=True),
-    keras.callbacks.EarlyStopping(monitor='acc', patience=1)
+    keras.callbacks.EarlyStopping(monitor='val_loss', patience=1)
 ]
 
 # Training parameters
