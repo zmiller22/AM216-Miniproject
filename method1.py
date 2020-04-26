@@ -17,10 +17,6 @@ import networkx as nx
 import tensorflow as tf
 import tensorflow.keras as keras
 
-# config = tf.compat.v1.ConfigProto()
-# config.gpu_options.allow_growth = True
-# sess = tf.compat.v1.Session(config=config)
-
 
 #%% TF's code from project notebook (cut out unimportant parts)
 
@@ -67,51 +63,28 @@ drugs_ecfp2 = np.array([ Chem.GetMorganFingerprintAsBitVect(m,2) for m in drugs_
 # Prepare train/test data with fold indices
 rows, cols = np.where(np.isnan(affinity)==False)
  
-#%%
+#%% Perform 5-fold cross validation
 from tensorflow.keras.layers import Input, Dense, Conv1D, MaxPool1D, Flatten, Concatenate, concatenate, Dropout
 from tensorflow.keras.models import Model
 import gc
 
-
-# def reset_keras(model):
-#     sess = get_session()
-#     clear_session()
-#     sess.close()
-#     sess = get_session()
-
-#     try:
-#         del model # this is from global space - change this as you need
-#     except:
-#         pass
-    
-#     print(gc.collect()) # if it's done something you should see a number being outputted
-    
-#     # use the same config as you used to create the session
-#     config = tf.ConfigProto()
-#     config.gpu_options.per_process_gpu_memory_fraction = 1
-#     config.gpu_options.visible_device_list = "0"
-#     set_session(tf.Session(config=config))
-
-
 validate_idx = int(np.around(len(train_fold[0])*0.8))
 mse_list = []
 
+# Run 5-fold cross validation
 for i in range(5):
 
     # Get train data for this fold
- #   drugs_tr = drugs[rows[ train_fold[i][:validate_idx] ]] #98545 array of SMILES strings
     proteins_tr = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[i][:validate_idx] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
     drugs_ecfp2_tr = drugs_ecfp2[ rows[ train_fold[i][:validate_idx] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
     affinity_tr = affinity[ rows[ train_fold[i][:validate_idx] ], cols[ train_fold[i][:validate_idx] ]] #98545 array of affinity vals
     
     # Get validation data for this fold
-#    drugs_val = drugs[rows[ train_fold[i][validate_idx:] ]] #98545 array of SMILES strings
     proteins_val = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[i][validate_idx:] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
     drugs_ecfp2_val = drugs_ecfp2[ rows[ train_fold[i][validate_idx:] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
     affinity_val = affinity[ rows[ train_fold[i][validate_idx:] ], cols[ train_fold[i][validate_idx:] ]] #98545 array of affinity vals
     
     # get test data for this fold
-#    drugs_ts = drugs[rows[ test_fold[i] ]]
     drugs_ecfp2_ts = drugs_ecfp2[ rows[test_fold[i]] ][:,:,np.newaxis]
     proteins_ts = np.array([seq_to_cat(p) for p in proteins[cols[test_fold[i]]]])[:,:,np.newaxis]
     affinity_ts = affinity[rows[test_fold[i]], cols[test_fold[i]]]
@@ -150,8 +123,8 @@ for i in range(5):
     # Create the model
     model = Model(inputs=[drug_input, protein_input], outputs=output)
     
-    # Save only the best model and stop training after 2 epochs in a row with
-    # worse val_loss
+    # Save only the best model and stop training after an epoch with worse
+    # validation loss
     callbacks_list = [
         keras.callbacks.ModelCheckpoint(
             filepath=f'best_model_fold{i}.h5',
@@ -159,18 +132,15 @@ for i in range(5):
         keras.callbacks.EarlyStopping(monitor='val_loss', patience=1)
     ]
     
-    # Training parameters
+    # Set training parameters
     BATCH_SIZE = 64
     EPOCHS = 50
-    
-    # Optimizer Parameters
     LR = 0.01
     MOMENTUM = 0
     OPT = tf.keras.optimizers.Adam()
-    
-    # Loss parameters
     LOSS = 'mse'
     
+    # Compile and train the model on fold i
     model.compile(optimizer=OPT, loss=LOSS) 
     H = model.fit([drugs_ecfp2_tr, proteins_tr], affinity_tr, 
                   validation_data=([drugs_ecfp2_val, proteins_val], affinity_val),
@@ -178,18 +148,87 @@ for i in range(5):
                   verbose=1
                   )
     
+    # Test the model on the test set and save the result
     model = keras.models.load_model(f'best_model_fold{i}.h5')
     score = model.evaluate([drugs_ecfp2_ts, proteins_ts], affinity_ts,
                            batch_size=64)
     mse_list.append(score)
     
     # Clear the session, grabage collect unused memory, and delete the model 
-    #variable to prevent GPU memory fragmentation over models
+    # variable to prevent GPU memory fragmentation over loop iterations
     tf.keras.backend.clear_session()
     gc.collect()
     del model
-
     
 
+#%% Train the final version of the model
+
+# Get the training data
+proteins_tr = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[0] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
+drugs_ecfp2_tr = drugs_ecfp2[ rows[ train_fold[0] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
+affinity_tr = affinity[ rows[ train_fold[0] ], cols[ train_fold[0] ]] #98545 array of affinity vals
     
-    
+# Get the validation data
+drugs_ecfp2_val = drugs_ecfp2[ rows[test_fold[0]] ][:,:,np.newaxis]
+proteins_val = np.array([seq_to_cat(p) for p in proteins[cols[test_fold[0]]]])[:,:,np.newaxis]
+affinity_val = affinity[rows[test_fold[0]], cols[test_fold[0]]]
+
+
+# Define model architecture    
+drug_input_shape = (2048,1)
+protein_input_shape = (1000,1)
+
+# Conv block for the drugs
+drug_input = Input( shape=drug_input_shape, name='Drugs_Input' )
+dl_2 = Conv1D(25, 20, activation='relu')(drug_input)
+dl_3 = Conv1D(50, 20, activation='relu')(dl_2)
+dl_4  = Conv1D(100, 20, activation='relu')(dl_3)
+dl_5 = MaxPool1D(3)(dl_4)
+dl_6 = Flatten()(dl_5)
+
+# Conv block for the proteins
+protein_input = Input( shape=protein_input_shape, name="Proteins_Input")
+pl_2 = Conv1D(25, 10, activation='relu')(protein_input)
+pl_3 = Conv1D(50, 10, activation='relu')(pl_2)
+pl_4  = Conv1D(100, 10, activation='relu')(pl_3)
+pl_5 = MaxPool1D(3)(pl_4)
+pl_6 = Flatten()(pl_5)
+
+# Combined output of both the Conv blocks
+comb_input = Concatenate(1)([dl_6, pl_6])
+
+# Dense layers to output
+cl_1 = Dense(512)(comb_input)
+cl_2 = Dropout(0.1)(cl_1)
+cl_3 = Dense(512)(cl_2)
+cl_4 = Dropout(0.1)(cl_3)
+cl_5 = Dense(256)(cl_4)
+output = Dense(1)(cl_5)
+
+# Create the model
+model = Model(inputs=[drug_input, protein_input], outputs=output)
+
+# Save only the best model and stop training after 2 epochs in a row with
+# worse val_loss
+callbacks_list = [
+    keras.callbacks.ModelCheckpoint(
+        filepath=f'final_model.h5',
+        monitor='val_loss', mode='min', save_best_only=True),
+    keras.callbacks.EarlyStopping(monitor='val_loss', patience=2)
+]
+
+# Set training parameters
+BATCH_SIZE = 64
+EPOCHS = 50
+LR = 0.01
+MOMENTUM = 0
+OPT = tf.keras.optimizers.Adam()
+LOSS = 'mse'
+
+# Compile and train the model
+model.compile(optimizer=OPT, loss=LOSS) 
+H = model.fit([drugs_ecfp2_tr, proteins_tr], affinity_tr, 
+              validation_data=([drugs_ecfp2_val, proteins_val], affinity_val),
+              epochs=EPOCHS, batch_size=BATCH_SIZE, callbacks=callbacks_list,
+              verbose=1
+              )
