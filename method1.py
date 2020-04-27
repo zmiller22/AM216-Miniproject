@@ -7,6 +7,7 @@ from collections import OrderedDict
 
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn import preprocessing
 
 import deepchem as dc
 from rdkit.Chem import AllChem as Chem
@@ -40,6 +41,7 @@ drugs_ = json.load(open(fpath + "ligands_can.txt"), object_pairs_hook=OrderedDic
 drugs = np.array([ Chem.MolToSmiles(Chem.MolFromSmiles(d),isomericSmiles=True) for d in drugs_.values() ])
 proteins_ = json.load(open(fpath + "proteins.txt"), object_pairs_hook=OrderedDict)
 proteins = np.array(list(proteins_.values()))
+proteins = np.array([seq_to_cat(p) for p in proteins])
 
 # Read in affinity data
 affinity = np.array(pickle.load(open(fpath + "Y","rb"), encoding='latin1'))
@@ -60,6 +62,10 @@ for i in range(5):
 drugs_2 = np.array([Chem.MolFromSmiles(smile) for smile in drugs ])
 drugs_ecfp2 = np.array([ Chem.GetMorganFingerprintAsBitVect(m,2) for m in drugs_2 ])
 
+# Standardize the data
+drugs_ecfp2 = preprocessing.scale(drugs_ecfp2)
+proteins = preprocessing.scale(proteins)
+
 # Prepare train/test data with fold indices
 rows, cols = np.where(np.isnan(affinity)==False)
  
@@ -75,18 +81,18 @@ mse_list = []
 for i in range(5):
 
     # Get train data for this fold
-    proteins_tr = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[i][:validate_idx] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
+    proteins_tr = proteins[cols[ train_fold[i][:validate_idx] ]][:,:,np.newaxis]#98545x1000 array of protein row vectors
     drugs_ecfp2_tr = drugs_ecfp2[ rows[ train_fold[i][:validate_idx] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
     affinity_tr = affinity[ rows[ train_fold[i][:validate_idx] ], cols[ train_fold[i][:validate_idx] ]] #98545 array of affinity vals
     
     # Get validation data for this fold
-    proteins_val = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[i][validate_idx:] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
+    proteins_val = proteins[cols[ train_fold[i][validate_idx:] ]][:,:,np.newaxis]#98545x1000 array of protein row vectors
     drugs_ecfp2_val = drugs_ecfp2[ rows[ train_fold[i][validate_idx:] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
     affinity_val = affinity[ rows[ train_fold[i][validate_idx:] ], cols[ train_fold[i][validate_idx:] ]] #98545 array of affinity vals
     
     # get test data for this fold
     drugs_ecfp2_ts = drugs_ecfp2[ rows[test_fold[i]] ][:,:,np.newaxis]
-    proteins_ts = np.array([seq_to_cat(p) for p in proteins[cols[test_fold[i]]]])[:,:,np.newaxis]
+    proteins_ts = proteins[cols[test_fold[i]]][:,:,np.newaxis]
     affinity_ts = affinity[rows[test_fold[i]], cols[test_fold[i]]]
 
     # Define model architecture    
@@ -164,13 +170,13 @@ for i in range(5):
 #%% Train the final version of the model
 
 # Get the training data
-proteins_tr = np.array([seq_to_cat(p) for p in proteins[cols[ train_fold[0] ]]])[:,:,np.newaxis]#98545x1000 array of protein row vectors
+proteins_tr = proteins[cols[ train_fold[0] ]][:,:,np.newaxis]#98545x1000 array of protein row vectors
 drugs_ecfp2_tr = drugs_ecfp2[ rows[ train_fold[0] ] ][:,:,np.newaxis] #98545x2048 array of molecule fingerprint bit vectors
 affinity_tr = affinity[ rows[ train_fold[0] ], cols[ train_fold[0] ]] #98545 array of affinity vals
     
 # Get the validation data
 drugs_ecfp2_val = drugs_ecfp2[ rows[test_fold[0]] ][:,:,np.newaxis]
-proteins_val = np.array([seq_to_cat(p) for p in proteins[cols[test_fold[0]]]])[:,:,np.newaxis]
+proteins_val = proteins[cols[test_fold[0]]][:,:,np.newaxis]
 affinity_val = affinity[rows[test_fold[0]], cols[test_fold[0]]]
 
 
